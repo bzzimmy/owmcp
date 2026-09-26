@@ -10,7 +10,7 @@ const DESCRIPTION = `Run Luau in the Roblox client (Opiumware, thread identity 8
 - Just \`return\` values; tables, Instances, Vector3s etc. are serialized automatically. Don't JSONEncode.
 - Each run has its own global scope. Use getgenv() to keep state between runs. _G is the executor's; the game's is getrenv()._G.
 - Full executor API is available (getgc, hookmetamethod, decompile, firesignal, ...).
-- Long-running code (loops, listeners) should task.spawn and return right away instead of hitting the timeout.
+- Long-running code (loops, listeners) should task.spawn and return right away. On timeout the run itself is cancelled, but threads it spawned keep running.
 - Errors returned here are NOT in the console. Errors/prints after the run returns (spawned/deferred code) only show in logs: use logs sinceExecute=true.
 - Separate execute calls made in parallel may run in any order.
 - Large results are saved to a temp file whose path is returned.`;

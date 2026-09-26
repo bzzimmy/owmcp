@@ -19,6 +19,8 @@ export interface RunOptions {
   timeoutMs?: number;
   /** Return the first value as raw JSON in `data` instead of display strings. */
   raw?: boolean;
+  /** Cancel the run's thread in-game if it times out (default true). */
+  cancelOnTimeout?: boolean;
 }
 
 interface Pending {
@@ -65,21 +67,20 @@ export function luaString(value: string): string {
 
 /** Runs Luau code in Roblox and waits for its result. */
 export async function run(code: string, options: RunOptions = {}): Promise<RunResult> {
-  const { port, timeoutMs = 15_000, raw = false } = options;
+  const { port, timeoutMs = 15_000, raw = false, cancelOnTimeout = true } = options;
   callbackPort ??= startCallbackServer();
 
   const id = randomUUID();
   const callback = `http://127.0.0.1:${await callbackPort}/${id}`;
-  const source = `local MCP_CALLBACK, MCP_SOURCE, MCP_RAW = ${luaString(callback)}, ${luaString(code)}, ${String(raw)}\n${RUNTIME}`;
+  const source = `local MCP_ID, MCP_CALLBACK, MCP_SOURCE, MCP_RAW = ${luaString(id)}, ${luaString(callback)}, ${luaString(code)}, ${String(raw)}\n${RUNTIME}`;
 
   const result = new Promise<RunResult>((resolve, reject) => {
     const timer = setTimeout(() => {
       pending.delete(id);
-      reject(
-        new Error(
-          `No result within ${timeoutMs / 1000}s. The code may still be running (long yield/loop) or crashed before reporting; check the logs.`,
-        ),
-      );
+      const outcome = cancelOnTimeout ? cancel(id, port) : Promise.resolve("");
+      void outcome.then((message) => {
+        reject(new Error(`No result within ${timeoutMs / 1000}s. ${message}`.trim()));
+      });
     }, timeoutMs);
     pending.set(id, { resolve, timer });
   });
@@ -100,4 +101,26 @@ export async function runData<T>(code: string, args: unknown, options: Omit<RunO
   const result = await run(prelude + code, { ...options, raw: true });
   if (!result.ok) throw new Error(result.error ?? "Unknown error in Roblox");
   return result.data as T;
+}
+
+const CANCEL = `
+local runs = getgenv().__owmcp_runs
+local entry = runs and runs[ARGS.id]
+if not entry then return false end
+runs[ARGS.id] = nil
+getgenv().__owmcp_sinks[entry.sink] = nil
+task.cancel(entry.thread)
+return true
+`;
+
+/** Cancels a run that is still in progress (e.g. after a timeout). Returns a human-readable outcome. */
+async function cancel(id: string, port?: number): Promise<string> {
+  try {
+    const cancelled = await runData<boolean>(CANCEL, { id }, { port, timeoutMs: 3000, cancelOnTimeout: false });
+    return cancelled
+      ? "The run was cancelled (threads it spawned with task.spawn/delay keep running)."
+      : "The run had already finished or crashed before reporting; check the logs.";
+  } catch {
+    return "Could not cancel it: the client is not responding (possibly frozen by a loop that never yields).";
+  }
 }

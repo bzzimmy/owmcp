@@ -7,8 +7,7 @@ import { parseRegex } from "../regex.js";
 const READ_LINES = 150;
 const MATCHES_PER_SCRIPT = 5;
 /** Above this many scripts, list shows counts per folder instead of every path. */
-const LIST_INLINE = 60;
-const LIST_INLINE_FILTERED = 120;
+const LIST_INLINE = 50;
 const MAX_FOLDERS = 40;
 
 const DESCRIPTION = `Read the game's client-side code (LocalScripts, ModuleScripts; server Scripts never reach the client).
@@ -65,8 +64,7 @@ async function list(filter: RegExp | undefined, port?: number) {
 
   const header = filter ? `${shown.length} of ${scripts.length} scripts match /${filter.source}/` : `${scripts.length} scripts`;
   const lines = shown.map((script) => `${script.class.padEnd(12)} ${script.path}`);
-  // A filter means the agent wants actual paths, so allow more of them inline.
-  if (lines.length <= (filter ? LIST_INLINE_FILTERED : LIST_INLINE)) {
+  if (lines.length <= LIST_INLINE) {
     return text([`${header} (${breakdown || "none"})`, "", ...lines].join("\n"));
   }
 
@@ -96,6 +94,9 @@ async function read(path: string, startLine = 1, endLine?: number, port?: number
   const lines = source.split("\n");
   if (startLine > lines.length) {
     return text(`startLine ${startLine} is past the end of ${script.path} (${lines.length} lines).`, true);
+  }
+  if (endLine !== undefined && endLine < startLine) {
+    return text(`endLine ${endLine} is before startLine ${startLine}.`, true);
   }
   const from = startLine;
   const to = Math.min(endLine ?? from + READ_LINES - 1, lines.length);

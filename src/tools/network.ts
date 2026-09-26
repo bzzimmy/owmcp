@@ -6,7 +6,6 @@ import { fit, save, text, truncate } from "../output.js";
 import { parseRegex } from "../regex.js";
 
 const LUA = readFileSync(new URL("../../lua/network.luau", import.meta.url), "utf8");
-const MAX_SUMMARY = 30;
 /** Per-value cap in the saved full log, so huge payloads stay greppable. */
 const MAX_SAVED_VALUE = 2_000;
 
@@ -47,7 +46,7 @@ export function registerNetwork(server: McpServer) {
         action: z.enum(["start", "stop", "read"]),
         remote: z.string().optional().describe("read: case-insensitive regex on remote path/method; lists matching calls."),
         exclude: z.string().optional().describe("read: case-insensitive regex of remotes to hide (e.g. noisy ones)."),
-        limit: z.number().int().min(1).max(500).default(20).describe("read: max calls shown (newest)."),
+        limit: z.number().int().min(1).max(500).default(20).describe("read: max rows shown (remotes in the summary, newest calls with remote=)."),
         port: z.number().int().optional().describe("Opiumware port (default: first found)."),
       },
     },
@@ -79,13 +78,13 @@ export function registerNetwork(server: McpServer) {
         .join(" · ");
 
       if (entries.length === 0) return text(`${status}\nNo calls recorded${hide ? " (after exclude)" : ""}.`);
-      return include ? calls(status, entries, include, limit) : summary(status, entries, capture.elapsed);
+      return include ? calls(status, entries, include, limit) : summary(status, entries, capture.elapsed, limit);
     },
   );
 }
 
 /** One line per remote: how often it fired and its latest arguments. */
-function summary(status: string, entries: Entry[], elapsed: number) {
+function summary(status: string, entries: Entry[], elapsed: number, limit: number) {
   const groups = new Map<string, { entry: Entry; count: number }>();
   for (const entry of entries) {
     const key = `${entry.direction} ${entry.method} ${entry.remote}`;
@@ -100,12 +99,12 @@ function summary(status: string, entries: Entry[], elapsed: number) {
 
   const sorted = [...groups.values()].sort((a, b) => b.count - a.count);
   const lines = sorted
-    .slice(0, MAX_SUMMARY)
+    .slice(0, limit)
     .map(({ entry, count }) => {
       const rate = `${(count / Math.max(elapsed, 1)).toFixed(1)}/s`;
       return `${String(count).padStart(5)} ${rate.padStart(7)}  ${entry.direction.padEnd(3)} ${entry.method.padEnd(13)} ${entry.remote}  latest: (${truncate(entry.args, 120)})`;
     });
-  if (sorted.length > MAX_SUMMARY) lines.push(`… ${sorted.length - MAX_SUMMARY} more remotes (use remote/exclude to narrow).`);
+  if (sorted.length > limit) lines.push(`… ${sorted.length - limit} more remotes (raise limit or use exclude).`);
 
   return text(
     fit(

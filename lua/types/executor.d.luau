@@ -1,4 +1,5 @@
 -- Executor (Opiumware) and owmcp globals used by lua/, for luau-lsp.
+declare MCP_ID: string
 declare MCP_CALLBACK: string
 declare MCP_SOURCE: string
 declare MCP_RAW: boolean

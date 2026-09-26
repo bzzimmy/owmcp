@@ -1,7 +1,8 @@
 --!nolint DeprecatedApi
 -- (getfenv/setfenv are required to sandbox print/warn for executed code)
 -- owmcp runtime. The bridge prepends:
---   local MCP_CALLBACK, MCP_SOURCE, MCP_RAW = "<callback url>", "<user code>", <bool>
+--   local MCP_ID, MCP_CALLBACK, MCP_SOURCE, MCP_RAW = "<run id>", "<callback url>", "<user code>", <bool>
+-- Runs in progress are registered in getgenv().__owmcp_runs[MCP_ID] so the bridge can cancel them on timeout.
 -- Runs MCP_SOURCE, captures print/warn, serializes return values and POSTs the result to MCP_CALLBACK.
 -- With MCP_RAW, the first return value is sent as-is (JSON) in `data` instead of being serialized for display.
 
@@ -10,6 +11,7 @@ local httpRequest = request or http_request
 
 local MAX_DEPTH = 4
 local MAX_ITEMS = 50
+local INLINE_WIDTH = 80
 local MAX_OUTPUT = 500
 
 -- Readable text for any value. indent = "" for multi-line output, nil for a compact single line.
@@ -34,7 +36,7 @@ local function serialize(value, depth, seen, indent)
 	seen[value] = true
 
 	local pad = if indent then indent .. "  " else nil
-	local lines, count, nextIndex = {}, 0, 1
+	local items, count, nextIndex = {}, 0, 1
 	for key, item in pairs(value) do
 		count += 1
 		if count > MAX_ITEMS then continue end
@@ -44,18 +46,20 @@ local function serialize(value, depth, seen, indent)
 		elseif type(key) == "string" and key:match("^[%a_][%w_]*$") then
 			prefix = key .. " = "
 		else
-			prefix = "[" .. serialize(key, depth + 1, seen, pad) .. "] = "
+			prefix = "[" .. serialize(key, depth + 1, seen, nil) .. "] = "
 		end
-		table.insert(lines, (pad or "") .. prefix .. serialize(item, depth + 1, seen, pad))
+		table.insert(items, prefix .. serialize(item, depth + 1, seen, pad))
 	end
 	if count > MAX_ITEMS then
-		table.insert(lines, (pad or "") .. "... " .. (count - MAX_ITEMS) .. " more")
+		table.insert(items, "... " .. (count - MAX_ITEMS) .. " more")
 	end
 
 	seen[value] = nil
-	if #lines == 0 then return "{}" end
-	if not indent then return "{" .. table.concat(lines, ", ") .. "}" end
-	return "{\n" .. table.concat(lines, ",\n") .. "\n" .. indent .. "}"
+	if #items == 0 then return "{}" end
+	-- Small tables stay on one line even in multi-line mode.
+	local inline = "{" .. table.concat(items, ", ") .. "}"
+	if not indent or (#inline <= INLINE_WIDTH and not inline:find("\n")) then return inline end
+	return "{\n" .. pad .. table.concat(items, ",\n" .. pad) .. "\n" .. indent .. "}"
 end
 
 local function report(result)
@@ -112,9 +116,13 @@ if not fn then
 end
 setfenv(fn, env)
 
+local runs = getgenv().__owmcp_runs or {}
+getgenv().__owmcp_runs = runs
+runs[MCP_ID] = { thread = coroutine.running(), sink = sink }
 sinks[sink] = true
 local results = table.pack(xpcall(fn, onError))
 sinks[sink] = nil
+runs[MCP_ID] = nil
 
 local output = sink.lines
 if sink.dropped > 0 then

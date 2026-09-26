@@ -51,7 +51,8 @@ export function registerLogs(server: McpServer) {
       const levels = new Set<Level>(level);
       const since = Math.max(
         seconds === undefined ? 0 : Date.now() - seconds * 1000,
-        sinceExecute ? (lastExecute.at ?? 0) : 0,
+        // Roblox's log timestamps lag the system clock (~70ms measured), so allow some slack.
+        sinceExecute ? (lastExecute.at ?? 0) - 1000 : 0,
       );
       const matched = entries
         .slice(start)
@@ -88,7 +89,7 @@ export function registerLogs(server: McpServer) {
   );
 }
 
-/** Merges consecutive identical entries. */
+/** Merges consecutive identical entries; a group shows its newest occurrence. */
 function collapse(entries: LogEntry[]): Group[] {
   const groups: Group[] = [];
   for (const entry of entries) {
@@ -100,6 +101,7 @@ function collapse(entries: LogEntry[]): Group[] {
       last.entry.stack.join() === entry.stack.join()
     ) {
       last.count++;
+      last.entry = entry;
     } else {
       groups.push({ entry, count: 1 });
     }
