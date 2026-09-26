@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { getScripts, sourceOf, type GameScript } from "../gameScripts.js";
 import { fit, save, text, truncate } from "../output.js";
+import { parseRegex } from "../regex.js";
 
 const READ_LINES = 150;
 const MATCHES_PER_SCRIPT = 5;
@@ -33,7 +34,7 @@ export function registerScripts(server: McpServer) {
       },
     },
     async ({ action, path, query, filter, startLine, endLine, limit, port }) => {
-      const filterPattern = regex(filter);
+      const filterPattern = parseRegex(filter);
       if (filterPattern instanceof Error) return text(`Invalid filter regex: ${filterPattern.message}`, true);
 
       switch (action) {
@@ -43,7 +44,7 @@ export function registerScripts(server: McpServer) {
           if (!path) return text("read needs `path`.", true);
           return read(path, startLine, endLine, port);
         case "search": {
-          const queryPattern = regex(query);
+          const queryPattern = parseRegex(query);
           if (!queryPattern) return text("search needs `query`.", true);
           if (queryPattern instanceof Error) return text(`Invalid query regex: ${queryPattern.message}`, true);
           return search(queryPattern, filterPattern, limit, port);
@@ -149,13 +150,4 @@ function notFound(path: string, scripts: GameScript[]): string {
   const name = (path.split(".").at(-1) ?? path).toLowerCase();
   const similar = scripts.filter((script) => script.path.toLowerCase().includes(name)).slice(0, 10);
   return [`No script at path "${path}".`, ...(similar.length > 0 ? ["Similar:", ...similar.map((s) => `  ${s.path}`)] : ["Use action=list to see paths."])].join("\n");
-}
-
-function regex(source: string | undefined): RegExp | Error | undefined {
-  if (source === undefined) return undefined;
-  try {
-    return new RegExp(source, "i");
-  } catch (error) {
-    return error instanceof Error ? error : new Error(String(error));
-  }
 }

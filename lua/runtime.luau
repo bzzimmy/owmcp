@@ -12,6 +12,7 @@ local MAX_DEPTH = 4
 local MAX_ITEMS = 50
 local MAX_OUTPUT = 500
 
+-- Readable text for any value. indent = "" for multi-line output, nil for a compact single line.
 local function serialize(value, depth, seen, indent)
 	local kind = typeof(value)
 
@@ -32,7 +33,7 @@ local function serialize(value, depth, seen, indent)
 	if depth >= MAX_DEPTH then return "{...}" end
 	seen[value] = true
 
-	local pad = indent .. "  "
+	local pad = if indent then indent .. "  " else nil
 	local lines, count, nextIndex = {}, 0, 1
 	for key, item in pairs(value) do
 		count += 1
@@ -45,14 +46,15 @@ local function serialize(value, depth, seen, indent)
 		else
 			prefix = "[" .. serialize(key, depth + 1, seen, pad) .. "] = "
 		end
-		table.insert(lines, pad .. prefix .. serialize(item, depth + 1, seen, pad))
+		table.insert(lines, (pad or "") .. prefix .. serialize(item, depth + 1, seen, pad))
 	end
 	if count > MAX_ITEMS then
-		table.insert(lines, pad .. "-- ... " .. (count - MAX_ITEMS) .. " more")
+		table.insert(lines, (pad or "") .. "... " .. (count - MAX_ITEMS) .. " more")
 	end
 
 	seen[value] = nil
 	if #lines == 0 then return "{}" end
+	if not indent then return "{" .. table.concat(lines, ", ") .. "}" end
 	return "{\n" .. table.concat(lines, ",\n") .. "\n" .. indent .. "}"
 end
 
@@ -84,6 +86,10 @@ end
 local env = setmetatable({
 	print = capture("", print),
 	warn = capture("[warn] ", warn),
+	-- serialize(value, pretty?): the same readable text used for return values (compact single line by default).
+	serialize = function(value, pretty)
+		return serialize(value, 0, {}, if pretty then "" else nil)
+	end,
 }, { __index = getfenv(0) })
 
 local fn, syntaxError = loadstring(MCP_SOURCE, "=mcp")

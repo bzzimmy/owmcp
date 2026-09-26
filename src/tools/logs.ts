@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { fit, save, text, truncate } from "../output.js";
+import { parseRegex } from "../regex.js";
 import { latestLogFile, LOG_DIR, readLog, type Level, type LogEntry } from "../robloxLog.js";
 
 const DESCRIPTION = `Read the Roblox client console (print/warn/error from all scripts, including the game's own), newest last.
@@ -38,12 +39,8 @@ export function registerLogs(server: McpServer) {
       const file = await latestLogFile();
       if (!file) return text(`No Roblox log files found in ${LOG_DIR}.`, true);
 
-      let pattern: RegExp | undefined;
-      try {
-        pattern = grep === undefined ? undefined : new RegExp(grep, "i");
-      } catch (error) {
-        return text(`Invalid grep regex: ${error instanceof Error ? error.message : String(error)}`, true);
-      }
+      const pattern = parseRegex(grep);
+      if (pattern instanceof Error) return text(`Invalid grep regex: ${pattern.message}`, true);
 
       const entries = await readLog(file);
       const previous = cursor;
