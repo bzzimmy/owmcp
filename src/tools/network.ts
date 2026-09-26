@@ -7,10 +7,12 @@ import { parseRegex } from "../regex.js";
 
 const LUA = readFileSync(new URL("../../lua/network.luau", import.meta.url), "utf8");
 const MAX_SUMMARY = 30;
+/** Per-value cap in the saved full log, so huge payloads stay greppable. */
+const MAX_SAVED_VALUE = 2_000;
 
 const DESCRIPTION = `Capture remote traffic between the client and server: outgoing FireServer/InvokeServer (with InvokeServer return values and the calling script) and incoming OnClientEvent.
-- start: begin a fresh capture. stop: stop recording (the log is kept). read: view the log (works while running).
-- read without \`remote\` gives a per-remote summary (count + latest args); with \`remote\` it lists individual calls with arguments.
+- start: begin a fresh capture (replaces the previous log). stop: stop recording (the log is kept). read: view the log (works while running).
+- read without \`remote\` gives a per-remote summary (count, rate, latest args); with \`remote\` it lists individual calls with arguments, collapsing consecutive identical calls.
 - Calls made by your own executed code are marked [by executor].
 - Long results are truncated and the full log is saved to a temp file.`;
 
@@ -30,6 +32,8 @@ interface Capture {
   elapsed: number;
   dropped: number;
   count: number;
+  wasCapturing: boolean;
+  previousCount: number;
   log?: Entry[];
 }
 
@@ -55,9 +59,15 @@ export function registerNetwork(server: McpServer) {
       }
 
       const capture = await runData<Capture>(LUA, { action }, { port });
-      if (action === "start") return text("Capturing remote traffic. Do the thing in-game (or via execute), then use action=read.");
+      if (action === "start") {
+        const discarded = capture.previousCount > 0 ? ` (discarded the previous capture's ${capture.previousCount} calls)` : "";
+        return text(`Capturing remote traffic${discarded}. Do the thing in-game (or via execute), then use action=read.`);
+      }
       if (!capture.started) return text("No capture yet. Use action=start first.", true);
-      if (action === "stop") return text(`Stopped. ${capture.count} calls recorded in ${capture.elapsed.toFixed(1)}s; use action=read to view them.`);
+      if (action === "stop") {
+        if (!capture.wasCapturing) return text(`Capture was not running (${capture.count} calls from the last capture are kept).`);
+        return text(`Stopped. ${capture.count} calls recorded in ${capture.elapsed.toFixed(1)}s; use action=read to view them.`);
+      }
 
       const entries = (capture.log ?? []).filter((entry) => !hide || !hide.test(entry.remote));
       const status = [
@@ -69,13 +79,13 @@ export function registerNetwork(server: McpServer) {
         .join(" · ");
 
       if (entries.length === 0) return text(`${status}\nNo calls recorded${hide ? " (after exclude)" : ""}.`);
-      return include ? calls(status, entries, include, limit) : summary(status, entries);
+      return include ? calls(status, entries, include, limit) : summary(status, entries, capture.elapsed);
     },
   );
 }
 
 /** One line per remote: how often it fired and its latest arguments. */
-function summary(status: string, entries: Entry[]) {
+function summary(status: string, entries: Entry[], elapsed: number) {
   const groups = new Map<string, { entry: Entry; count: number }>();
   for (const entry of entries) {
     const key = `${entry.direction} ${entry.method} ${entry.remote}`;
@@ -91,37 +101,62 @@ function summary(status: string, entries: Entry[]) {
   const sorted = [...groups.values()].sort((a, b) => b.count - a.count);
   const lines = sorted
     .slice(0, MAX_SUMMARY)
-    .map(({ entry, count }) => `${String(count).padStart(5)}  ${entry.direction.padEnd(3)} ${entry.method.padEnd(13)} ${entry.remote}  latest: (${truncate(entry.args, 120)})`);
+    .map(({ entry, count }) => {
+      const rate = `${(count / Math.max(elapsed, 1)).toFixed(1)}/s`;
+      return `${String(count).padStart(5)} ${rate.padStart(7)}  ${entry.direction.padEnd(3)} ${entry.method.padEnd(13)} ${entry.remote}  latest: (${truncate(entry.args, 120)})`;
+    });
   if (sorted.length > MAX_SUMMARY) lines.push(`… ${sorted.length - MAX_SUMMARY} more remotes (use remote/exclude to narrow).`);
 
   return text(
     fit(
       "network",
-      [`${status} · ${groups.size} remotes`, `Use remote="<regex>" to list individual calls with arguments.`, "", "count  dir method        remote", ...lines].join(
+      [`${status} · ${groups.size} remotes`, `Use remote="<regex>" to list individual calls with arguments.`, "", "count    rate  dir method        remote", ...lines].join(
         "\n",
       ),
     ),
   );
 }
 
-/** Individual calls matching `include`, newest last. */
+/** Individual calls matching `include`, newest last. Consecutive identical calls are collapsed to (xN). */
 function calls(status: string, entries: Entry[], include: RegExp, limit: number) {
   const matched = entries.filter((entry) => include.test(`${entry.remote}:${entry.method}`));
   if (matched.length === 0) return text(`${status}\nNo calls match /${include.source}/.`);
 
-  const shown = matched.slice(-limit);
-  const lines = shown.map((entry) => formatCall(entry, true));
-  const header = [`${status} · ${matched.length} matching /${include.source}/${shown.length < matched.length ? `, showing newest ${shown.length}` : ""}`];
-  if (shown.length < matched.length || lines.some((line, i) => line !== formatCall(shown[i] as Entry, false))) {
-    header.push(`Full untruncated calls: ${save("network", matched.map((entry) => formatCall(entry, false)).join("\n"))}`);
+  const groups: { entry: Entry; count: number }[] = [];
+  for (const entry of matched) {
+    const last = groups.at(-1);
+    if (last && sameCall(last.entry, entry)) last.count++;
+    else groups.push({ entry, count: 1 });
+  }
+
+  const shown = groups.slice(-limit);
+  const collapsed = matched.length - groups.length;
+  const lines = shown.map((group) => formatCall(group, 200));
+  const header = [
+    [
+      `${status} · ${matched.length} matching /${include.source}/`,
+      collapsed > 0 ? `${collapsed} repeats collapsed` : undefined,
+      shown.length < groups.length ? `showing newest ${shown.length}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+  ];
+  if (shown.length < groups.length || lines.some((line, i) => line !== formatCall(shown[i] as { entry: Entry; count: number }, Infinity))) {
+    const full = groups.map((group) => formatCall(group, MAX_SAVED_VALUE)).join("\n");
+    header.push(`Full calls (values capped at ${MAX_SAVED_VALUE} chars): ${save("network", full)}`);
   }
   return text(fit("network", [...header, "", ...lines].join("\n")));
 }
 
-/** Compact mode truncates args and return values separately, so remote and caller always stay visible. */
-function formatCall(entry: Entry, compact: boolean): string {
-  const shorten = (value: string) => (compact ? truncate(value, 200) : value);
+function sameCall(a: Entry, b: Entry): boolean {
+  return a.remote === b.remote && a.method === b.method && a.args === b.args && a.returned === b.returned && a.caller === b.caller;
+}
+
+/** Args and return values are truncated separately, so remote and caller always stay visible. */
+function formatCall({ entry, count }: { entry: Entry; count: number }, maxValue: number): string {
+  const shorten = (value: string) => truncate(value, maxValue);
   const returned = entry.returned === undefined ? "" : ` → ${shorten(entry.returned || "nil")}`;
   const caller = entry.caller ? `  [by ${entry.caller}]` : "";
-  return `+${entry.time.toFixed(2)}s ${entry.direction.padEnd(3)} ${entry.remote}:${entry.method}(${shorten(entry.args)})${returned}${caller}`;
+  const repeat = count > 1 ? `  (x${count})` : "";
+  return `+${entry.time.toFixed(2)}s ${entry.direction.padEnd(3)} ${entry.remote}:${entry.method}(${shorten(entry.args)})${returned}${caller}${repeat}`;
 }

@@ -66,21 +66,34 @@ local function report(result)
 	httpRequest({ Url = MCP_CALLBACK, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = body })
 end
 
--- print/warn go to the real console AND are captured for the result.
-local output, dropped = {}, 0
+-- print/warn go to the real console AND to every run currently in progress. Sinks are shared through getgenv,
+-- so prints from code defined in earlier runs (e.g. a spawned loop's stop()) are captured by the current run too.
+local sinks = getgenv().__owmcp_sinks or {}
+getgenv().__owmcp_sinks = sinks
+local sink = { lines = {}, dropped = 0 }
+
 local function capture(label, original)
 	return function(...)
 		original(...)
-		if #output >= MAX_OUTPUT then
-			dropped += 1
-			return
-		end
 		local parts = {}
 		for i = 1, select("#", ...) do
 			parts[i] = tostring((select(i, ...)))
 		end
-		table.insert(output, label .. table.concat(parts, " "))
+		local line = label .. table.concat(parts, " ")
+		for active in sinks do
+			if #active.lines < MAX_OUTPUT then
+				table.insert(active.lines, line)
+			else
+				active.dropped += 1
+			end
+		end
 	end
+end
+
+-- Errors can be any value (error({code = 1})), so format them before building the traceback.
+local function onError(err)
+	local message = if type(err) == "string" then err else "error value: " .. serialize(err, 0, {}, nil)
+	return debug.traceback(message, 2)
 end
 
 local env = setmetatable({
@@ -99,9 +112,13 @@ if not fn then
 end
 setfenv(fn, env)
 
-local results = table.pack(xpcall(fn, debug.traceback))
-if dropped > 0 then
-	table.insert(output, "... " .. dropped .. " more lines not captured")
+sinks[sink] = true
+local results = table.pack(xpcall(fn, onError))
+sinks[sink] = nil
+
+local output = sink.lines
+if sink.dropped > 0 then
+	table.insert(output, "... " .. sink.dropped .. " more lines not captured")
 end
 
 if not results[1] then

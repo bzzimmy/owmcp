@@ -74,6 +74,7 @@ if not state then
 	game.DescendantAdded:Connect(listen)
 end
 
+local wasCapturing, previousCount = state.capturing, #state.log
 if ARGS.action == "start" then
 	state.log, state.dropped, state.startedAt = {}, 0, os.clock()
 	state.capturing, state.started = true, true
@@ -87,5 +88,7 @@ return {
 	elapsed = (if state.capturing then os.clock() else state.stoppedAt) - state.startedAt,
 	dropped = state.dropped,
 	count = #state.log,
+	wasCapturing = wasCapturing,
+	previousCount = previousCount,
 	log = if ARGS.action == "read" then state.log else nil,
 }

@@ -6,6 +6,9 @@ export const LOG_DIR = join(homedir(), "Library", "Logs", "Roblox");
 
 export type Level = "print" | "warn" | "error" | "engine";
 
+/** When the execute tool last started a run (for logs sinceExecute). */
+export const lastExecute: { at?: number } = {};
+
 export interface LogEntry {
   time: Date;
   level: Level;
