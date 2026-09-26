@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { run, type RunResult } from "../bridge.js";
-import { fit, text } from "../output.js";
+import { compactLines, fit, save, text } from "../output.js";
 
 const DESCRIPTION = `Run Luau in the Roblox client (Opiumware, thread identity 8) and get back return values, print/warn output, and errors with traceback.
 - Just \`return\` values; tables, Instances, Vector3s etc. are serialized automatically. Don't JSONEncode.
@@ -38,7 +38,9 @@ export function registerExecute(server: McpServer) {
 function formatResult(result: RunResult): string {
   const sections: string[] = [];
   if (result.output.length > 0) {
-    sections.push("Output:\n" + result.output.join("\n"));
+    const { lines, truncated } = compactLines(result.output);
+    const full = truncated ? `\n(long lines truncated; full output: ${save("execute-output", result.output.join("\n"))})` : "";
+    sections.push("Output:\n" + lines.join("\n") + full);
   }
   if (!result.ok) {
     sections.push("Error:\n" + (result.error ?? "Unknown error").trimEnd());
