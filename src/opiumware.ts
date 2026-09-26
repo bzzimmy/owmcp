@@ -22,15 +22,16 @@ function connect(port: number, timeoutMs: number): Promise<net.Socket | null> {
   });
 }
 
+/** Whether something accepts TCP connections on 127.0.0.1:port. */
+export async function isListening(port: number): Promise<boolean> {
+  const socket = await connect(port, 300);
+  socket?.destroy();
+  return socket !== null;
+}
+
 /** Ports with an injected Roblox instance listening (one per instance). */
 export async function findPorts(): Promise<number[]> {
-  const open = await Promise.all(
-    PORTS.map(async (port) => {
-      const socket = await connect(port, 300);
-      socket?.destroy();
-      return socket ? port : null;
-    }),
-  );
+  const open = await Promise.all(PORTS.map(async (port) => ((await isListening(port)) ? port : null)));
   return open.filter((port) => port !== null);
 }
 
