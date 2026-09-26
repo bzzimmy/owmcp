@@ -1,8 +1,9 @@
 --!nolint DeprecatedApi
 -- (getfenv/setfenv are required to sandbox print/warn for executed code)
 -- owmcp runtime. The bridge prepends:
---   local MCP_CALLBACK, MCP_SOURCE = "<callback url>", "<user code>"
+--   local MCP_CALLBACK, MCP_SOURCE, MCP_RAW = "<callback url>", "<user code>", <bool>
 -- Runs MCP_SOURCE, captures print/warn, serializes return values and POSTs the result to MCP_CALLBACK.
+-- With MCP_RAW, the first return value is sent as-is (JSON) in `data` instead of being serialized for display.
 
 local HttpService = game:GetService("HttpService")
 local httpRequest = request or http_request
@@ -101,6 +102,11 @@ if not results[1] then
 	-- Drop runtime-internal frames (chunk "Opiumware") from the traceback.
 	local message = tostring(results[2]):gsub("Opiumware:%d+\n?", "")
 	report({ ok = false, returns = {}, output = output, error = message })
+	return
+end
+
+if MCP_RAW then
+	report({ ok = true, returns = {}, output = output, data = results[2] })
 	return
 end
 

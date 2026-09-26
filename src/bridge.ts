@@ -10,6 +10,15 @@ export interface RunResult {
   returns: string[];
   output: string[];
   error?: string;
+  /** Raw first return value (only with the `raw` option). */
+  data?: unknown;
+}
+
+export interface RunOptions {
+  port?: number;
+  timeoutMs?: number;
+  /** Return the first value as raw JSON in `data` instead of display strings. */
+  raw?: boolean;
 }
 
 interface Pending {
@@ -55,13 +64,13 @@ export function luaString(value: string): string {
 }
 
 /** Runs Luau code in Roblox and waits for its result. */
-export async function run(code: string, options: { port?: number; timeoutMs?: number } = {}): Promise<RunResult> {
-  const { port, timeoutMs = 15_000 } = options;
+export async function run(code: string, options: RunOptions = {}): Promise<RunResult> {
+  const { port, timeoutMs = 15_000, raw = false } = options;
   callbackPort ??= startCallbackServer();
 
   const id = randomUUID();
   const callback = `http://127.0.0.1:${await callbackPort}/${id}`;
-  const source = `local MCP_CALLBACK, MCP_SOURCE = ${luaString(callback)}, ${luaString(code)}\n${RUNTIME}`;
+  const source = `local MCP_CALLBACK, MCP_SOURCE, MCP_RAW = ${luaString(callback)}, ${luaString(code)}, ${String(raw)}\n${RUNTIME}`;
 
   const result = new Promise<RunResult>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -83,4 +92,12 @@ export async function run(code: string, options: { port?: number; timeoutMs?: nu
     throw error;
   }
   return result;
+}
+
+/** Runs tool Lua with JSON args (available as `ARGS`) and returns its raw first return value. */
+export async function runData<T>(code: string, args: unknown, options: Omit<RunOptions, "raw"> = {}): Promise<T> {
+  const prelude = `local ARGS = game:GetService("HttpService"):JSONDecode(${luaString(JSON.stringify(args))})\n`;
+  const result = await run(prelude + code, { ...options, raw: true });
+  if (!result.ok) throw new Error(result.error ?? "Unknown error in Roblox");
+  return result.data as T;
 }
