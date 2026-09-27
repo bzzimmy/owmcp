@@ -1,14 +1,17 @@
 -- Remote traffic capture. Run via runData with ARGS.action = "start" | "stop" | "read".
--- Hooks are installed once per game session (state kept in getgenv) and only record while capturing.
+-- Hooks exist only while capturing: start installs them, stop removes them. The log is kept in getgenv.
 
 local MAX_ENTRIES = 5000
 local REMOTE_EVENTS = { RemoteEvent = true, UnreliableRemoteEvent = true }
 
-local state = getgenv().__owmcp_network
+local state = getgenv().__owmcp_capture
 if not state then
 	state = { capturing = false, started = false, log = {}, dropped = 0, startedAt = 0, stoppedAt = 0 }
-	getgenv().__owmcp_network = state
+	getgenv().__owmcp_capture = state
+end
 
+-- Installs the hooks and returns a function that removes them again.
+local function install(): () -> ()
 	local toText = serialize -- captured as an upvalue: the hooks outlive this run
 
 	local function argsText(...)
@@ -60,26 +63,37 @@ if not state then
 	)
 
 	-- Incoming: OnClientEvent on every RemoteEvent, including ones created later.
+	local connections = {}
 	local function listen(instance)
 		if not REMOTE_EVENTS[instance.ClassName] then return end
-		instance.OnClientEvent:Connect(function(...)
+		table.insert(connections, instance.OnClientEvent:Connect(function(...)
 			if state.capturing then
 				pcall(record, os.clock(), { direction = "in", method = "OnClientEvent", remote = instance:GetFullName(), args = argsText(...) })
 			end
-		end)
+		end))
 	end
 	for _, instance in game:GetDescendants() do
 		listen(instance)
 	end
-	game.DescendantAdded:Connect(listen)
+	table.insert(connections, game.DescendantAdded:Connect(listen))
+
+	return function()
+		hookmetamethod(game, "__namecall", original)
+		for _, connection in connections do
+			connection:Disconnect()
+		end
+	end
 end
 
 local wasCapturing, previousCount = state.capturing, #state.log
 if ARGS.action == "start" then
 	state.log, state.dropped, state.startedAt = {}, 0, os.clock()
 	state.capturing, state.started = true, true
+	state.uninstall = state.uninstall or install()
 elseif ARGS.action == "stop" and state.capturing then
 	state.capturing, state.stoppedAt = false, os.clock()
+	state.uninstall()
+	state.uninstall = nil
 end
 
 return {

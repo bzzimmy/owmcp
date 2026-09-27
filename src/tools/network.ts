@@ -10,7 +10,8 @@ const LUA = readFileSync(new URL("../../lua/network.luau", import.meta.url), "ut
 const MAX_SAVED_VALUE = 2_000;
 
 const DESCRIPTION = `Capture remote traffic between the client and server: outgoing FireServer/InvokeServer (with InvokeServer return values and the calling script) and incoming OnClientEvent.
-- start: begin a fresh capture (replaces the previous log). stop: stop recording (the log is kept). read: view the log (works while running).
+- start: begin a fresh capture (replaces the previous log). stop: stop recording and remove the hooks (the log is kept). read: view the log (works while running).
+- Hooks only exist while capturing, so stop as soon as you have what you need.
 - read without \`remote\` gives a per-remote summary (count, rate, latest args); with \`remote\` it lists individual calls with arguments, collapsing consecutive identical calls.
 - Calls made by your own executed code are marked [by executor].
 - Long results are truncated and the full log is saved to a temp file.`;
