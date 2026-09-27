@@ -7,6 +7,7 @@
 -- With MCP_RAW, the first return value is sent as-is (JSON) in `data` instead of being serialized for display.
 
 local HttpService = game:GetService("HttpService")
+local GuiService = game:GetService("GuiService")
 local httpRequest = request or http_request
 
 local MAX_DEPTH = 4
@@ -79,7 +80,17 @@ local function jsonSafe(value)
 	return value
 end
 
+-- Scripts keep running after a kick or lost connection, so flag it: the game is dead until a rejoin.
+local function disconnectReason(): string?
+	local ok, reason = pcall(function()
+		if GuiService:GetErrorType() ~= Enum.ConnectionError.DisconnectErrors then return nil end
+		return GuiService:GetErrorCode().Name .. ": " .. GuiService:GetErrorMessage()
+	end)
+	return if ok then reason else nil
+end
+
 local function report(result)
+	result.disconnected = disconnectReason()
 	local ok, body = pcall(function()
 		return HttpService:JSONEncode(jsonSafe(result))
 	end)

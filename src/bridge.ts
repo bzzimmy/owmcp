@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { send } from "./opiumware.js";
 import { compactLines } from "./output.js";
+import { sessionFor } from "./session.js";
 
 /** What lua/runtime.luau reports back. */
 export interface RunResult {
@@ -11,6 +12,8 @@ export interface RunResult {
   returns: string[];
   output: string[];
   error?: string;
+  /** Set when the client was kicked or lost connection ("<ConnectionError>: <message>"). */
+  disconnected?: string;
   /** Raw first return value (only with the `raw` option). */
   data?: unknown;
 }
@@ -26,8 +29,13 @@ export interface RunOptions {
 
 interface Pending {
   resolve: (result: RunResult) => void;
-  timer: NodeJS.Timeout;
+  /** The timeout and the home screen check; cleared once the run settles. */
+  timers: NodeJS.Timeout[];
 }
+
+/** How long a run may take before checking whether Roblox is even in a game. */
+const HOME_CHECK_MS = 2000;
+const HOME_SCREEN = "Roblox is on the home screen, not in a game, so nothing runs. Use rejoin to go back into the game.";
 
 const RUNTIME = readFileSync(new URL("../lua/runtime.luau", import.meta.url), "utf8");
 const pending = new Map<string, Pending>();
@@ -45,7 +53,7 @@ function startCallbackServer(): Promise<number> {
         const entry = pending.get(id);
         if (!entry) return;
         pending.delete(id);
-        clearTimeout(entry.timer);
+        entry.timers.forEach(clearTimeout);
         try {
           entry.resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")) as RunResult);
         } catch {
@@ -75,21 +83,41 @@ export async function run(code: string, options: RunOptions = {}): Promise<RunRe
   const callback = `http://127.0.0.1:${await callbackPort}/${id}`;
   const source = `local MCP_ID, MCP_CALLBACK, MCP_SOURCE, MCP_RAW = ${luaString(id)}, ${luaString(callback)}, ${luaString(code)}, ${String(raw)}\n${RUNTIME}`;
 
+  let target = port;
   const result = new Promise<RunResult>((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const settle = () => {
+      const entry = pending.get(id);
       pending.delete(id);
-      const outcome = cancelOnTimeout ? cancel(id, port) : Promise.resolve("");
-      void outcome.then((message) => {
+      entry?.timers.forEach(clearTimeout);
+      return entry !== undefined;
+    };
+    const timer = setTimeout(() => {
+      if (!settle()) return;
+      void explainTimeout(id, target, cancelOnTimeout).then((message) => {
         reject(new Error(`No result within ${timeoutMs / 1000}s. ${message}`.trim()));
       });
     }, timeoutMs);
-    pending.set(id, { resolve, timer });
+    const timers = [timer];
+    // Nothing runs on the home screen, so fail fast instead of waiting out the whole timeout.
+    if (timeoutMs > HOME_CHECK_MS) {
+      timers.push(
+        setTimeout(() => {
+          if (target === undefined) return;
+          void sessionFor(target)
+            .catch(() => undefined)
+            .then((session) => {
+              if (session?.state === "home" && settle()) reject(new Error(HOME_SCREEN));
+            });
+        }, HOME_CHECK_MS),
+      );
+    }
+    pending.set(id, { resolve, timers });
   });
 
   try {
-    await send(source, port);
+    target = await send(source, port);
   } catch (error) {
-    clearTimeout(pending.get(id)?.timer);
+    pending.get(id)?.timers.forEach(clearTimeout);
     pending.delete(id);
     throw error;
   }
@@ -98,10 +126,24 @@ export async function run(code: string, options: RunOptions = {}): Promise<RunRe
 
 /** Runs tool Lua with JSON args (available as `ARGS`) and returns its raw first return value. */
 export async function runData<T>(code: string, args: unknown, options: Omit<RunOptions, "raw"> = {}): Promise<T> {
+  return (await runDataResult(code, args, options)).data as T;
+}
+
+/** Like runData, but also says whether the client was disconnected (see RunResult.disconnected). */
+export async function runDataResult(
+  code: string,
+  args: unknown,
+  options: Omit<RunOptions, "raw"> = {},
+): Promise<{ data: unknown; disconnected?: string }> {
   const prelude = `local ARGS = game:GetService("HttpService"):JSONDecode(${luaString(JSON.stringify(args))})\n`;
   const result = await run(prelude + code, { ...options, raw: true });
   if (!result.ok) throw new Error(result.error ?? "Unknown error in Roblox");
-  return result.data as T;
+  return { data: result.data, disconnected: result.disconnected };
+}
+
+/** Warning line for results from a disconnected client. */
+export function disconnectWarning(reason: string): string {
+  return `Warning: disconnected from the game (${reason}). Code still runs, but the server is gone. Use rejoin to continue.`;
 }
 
 const CANCEL = `
@@ -113,6 +155,13 @@ getgenv().__owmcp_sinks[entry.sink] = nil
 task.cancel(entry.thread)
 return entry.sink.lines
 `;
+
+/** Why a run timed out: nothing runs on the home screen; otherwise cancel the run if requested. */
+async function explainTimeout(id: string, port: number | undefined, cancelRun: boolean): Promise<string> {
+  const session = port === undefined ? undefined : await sessionFor(port).catch(() => undefined);
+  if (session?.state === "home") return HOME_SCREEN;
+  return cancelRun ? cancel(id, port) : "";
+}
 
 /** Cancels a run that is still in progress (e.g. after a timeout). Returns a human-readable outcome. */
 async function cancel(id: string, port?: number): Promise<string> {

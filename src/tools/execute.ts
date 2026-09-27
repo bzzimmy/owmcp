@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { run, type RunResult } from "../bridge.js";
+import { disconnectWarning, run, type RunResult } from "../bridge.js";
 import { compactLines, fit, save, text } from "../output.js";
 import { lastExecute } from "../robloxLog.js";
 
@@ -53,6 +53,9 @@ export function registerExecute(server: McpServer) {
 
 function formatResult(result: RunResult): string {
   const sections: string[] = [];
+  if (result.disconnected) {
+    sections.push(disconnectWarning(result.disconnected));
+  }
   if (result.output.length > 0) {
     const { lines, truncated } = compactLines(result.output);
     const full = truncated ? `\n(long lines truncated; full output: ${save("execute-output", result.output.join("\n"))})` : "";

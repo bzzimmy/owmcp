@@ -6,12 +6,15 @@ owmcp is an MCP server that lets AI agents drive the Opiumware Roblox executor o
 
 | Tool | Description |
 |---|---|
-| `status` | Check live Roblox instances (game, player, port) and decompiler state. |
+| `status` | Check live Roblox instances (game, player, port), whether they were kicked or are on the home screen, and decompiler state. |
 | `execute` | Run Luau code or a file. Returns return values, prints, and errors with tracebacks. Cancels the run on timeout. |
 | `logs` | Read the Roblox console. Filter by level, regex, time, limit, or "since the last execute". |
 | `scripts` | List, search, and read decompiled client scripts, mirrored as `.luau` files you can grep. |
 | `network` | Start, stop, and read captures of remote traffic (FireServer, InvokeServer, OnClientEvent), including arguments, return values, and calling scripts. Hooks only exist during capture. |
 | `screenshot` | Capture the Roblox window (even if covered) to visually verify ESP, UI, and menus. |
+| `rejoin` | Rejoin the last game (same server or any) after a kick or from the home screen, and wait until scripts run again. |
+
+If the client gets kicked or disconnected, `execute` results carry a warning and `status` shows the reason, so the agent knows to `rejoin`.
 
 Large outputs are saved to temporary files (`$TMPDIR/owmcp/`). Tools return the file path and a preview to keep the agent's context small.
 
