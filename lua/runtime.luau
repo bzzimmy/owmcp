@@ -62,8 +62,27 @@ local function serialize(value, depth, seen, indent)
 	return "{\n" .. pad .. table.concat(items, ",\n" .. pad) .. "\n" .. indent .. "}"
 end
 
+-- JSONEncode rejects strings that aren't valid UTF-8 (e.g. binary remote payloads), so escape their high bytes as \xNN.
+local function jsonSafe(value)
+	if type(value) == "string" then
+		if utf8.len(value) then return value end
+		return (value:gsub("[\128-\255]", function(byte)
+			return string.format("\\x%02X", string.byte(byte))
+		end))
+	elseif type(value) == "table" then
+		local copy = {}
+		for key, item in value do
+			copy[jsonSafe(key)] = jsonSafe(item)
+		end
+		return copy
+	end
+	return value
+end
+
 local function report(result)
-	local ok, body = pcall(HttpService.JSONEncode, HttpService, result)
+	local ok, body = pcall(function()
+		return HttpService:JSONEncode(jsonSafe(result))
+	end)
 	if not ok then
 		body = HttpService:JSONEncode({ ok = false, returns = {}, output = {}, error = "Failed to encode result: " .. tostring(body) })
 	end
