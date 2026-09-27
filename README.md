@@ -1,34 +1,35 @@
 # owmcp
 
-An MCP server that lets AI agents execute scripts and read logs through the Opiumware executor for interactive Roblox script development.
+owmcp is an MCP server that lets AI agents drive the Opiumware Roblox executor on macOS. It enables an agent to write a script, run it, check the logs or a screenshot, and iterate autonomously.
 
 ## Tools
 
-| Tool | What it does |
+| Tool | Description |
 |---|---|
-| `status` | Live Roblox instances (game, player, port) and decompiler state |
-| `execute` | Run Luau (inline or from a file) and get return values, prints, and errors with tracebacks |
-| `logs` | Read the Roblox console, filtered by level, regex, time, or "since the last execute" |
-| `scripts` | List, search, and read the game's decompiled client scripts |
-| `network` | Capture remote traffic with arguments, return values, and calling scripts |
-| `screenshot` | Capture the Roblox window to visually verify ESP, UI, and menus |
+| `status` | Check live Roblox instances (game, player, port) and decompiler state. |
+| `execute` | Run Luau code or a file. Returns return values, prints, and errors with tracebacks. Cancels the run on timeout. |
+| `logs` | Read the Roblox console. Filter by level, regex, time, limit, or "since the last execute". |
+| `scripts` | List, search, and read decompiled client scripts, mirrored as `.luau` files you can grep. |
+| `network` | Start, stop, and read captures of remote traffic (FireServer, InvokeServer, OnClientEvent), including arguments, return values, and calling scripts. Hooks only exist during capture. |
+| `screenshot` | Capture the Roblox window (even if covered) to visually verify ESP, UI, and menus. |
 
-Large outputs are saved to temp files (`$TMPDIR/owmcp/`) and the tool returns the path plus a preview, so results stay small in the agent's context.
+Large outputs are saved to temporary files (`$TMPDIR/owmcp/`). Tools return the file path and a preview to keep the agent's context small.
 
 ## Requirements
 
-- macOS with [Opiumware](https://opiumware.com) attached to Roblox
+- macOS
+- [Opiumware](https://opiumware.com) attached to Roblox
 - Node.js 18+
-- Screen Recording permission for the app running your MCP client (only for `screenshot`)
+- Screen Recording permissions for your MCP client's host app (only needed for `screenshot`).
 
 ## Setup
 
 ```sh
 git clone https://github.com/bzzimmy/owmcp && cd owmcp
-npm install   # also builds to build/
+npm install
 ```
 
-Add it to your MCP client config (e.g. `~/.config/mcp/mcp.json`, `.mcp.json`, or Claude Desktop):
+Configure your MCP client (e.g., Claude Desktop or `~/.config/mcp/mcp.json`):
 
 ```json
 {
@@ -41,26 +42,31 @@ Add it to your MCP client config (e.g. `~/.config/mcp/mcp.json`, `.mcp.json`, or
 }
 ```
 
-Keep the server process alive between calls if your client supports it: network captures and the decompile cache live in the process. Allow tool calls of up to ~5 minutes, since `execute` accepts timeouts up to 300s.
-
-Then open Roblox, attach Opiumware, and join a game. Call `status` to check the connection.
+- Keep the server process alive between calls. Network captures and the decompile cache live in-process.
+- Allow tool calls to run for up to ~5 minutes (`execute` takes timeouts up to 300s).
+- Open Roblox, attach Opiumware, join a game, and call `status` to verify the connection.
 
 ## How it works
 
-Code is sent to Opiumware over its local TCP port (8390–8399), wrapped in a small runtime (`lua/runtime.luau`) that captures output and posts the result back to a local HTTP callback. Nothing needs to be pasted into the executor, and rejoining a game doesn't break anything. Logs are read from `~/Library/Logs/Roblox`, and decompiling uses Opiumware's bundled decompiler, which is started automatically if needed.
+Scripts are sent to Opiumware's local TCP server (ports 8390–8399). They are wrapped in `lua/runtime.luau`, which captures output and posts the results back to a local HTTP callback.
+
+- You never need to paste code into the executor.
+- Rejoining a game does not break the connection.
+- Logs are read directly from `~/Library/Logs/Roblox`.
+- Decompiling uses Opiumware's bundled decompiler, which starts automatically if needed.
 
 ## Development
 
 ```sh
-npm run build   # compile TypeScript
-npm run lint    # ESLint, tsc, and luau-lsp for lua/
+npm run build   # Compile TypeScript
+npm run lint    # Run ESLint, tsc, and luau-lsp
 ```
 
-Rebuild after pulling changes; clients run `build/index.js`.
+Rebuild after pulling updates. Clients run `build/index.js`.
 
 ## Disclaimer
 
-Using executors violates Roblox's Terms of Use and can get accounts banned. `execute` runs arbitrary code in your client, so only connect agents you trust.
+Executors violate the Roblox Terms of Use and can lead to account bans. The `execute` tool runs arbitrary code in your client, so only connect agents you trust.
 
 ## License
 
