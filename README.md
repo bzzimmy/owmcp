@@ -11,6 +11,7 @@ An MCP server that lets AI agents execute scripts and read logs through the Opiu
 | `logs` | Read the Roblox console, filtered by level, regex, time, or "since the last execute" |
 | `scripts` | List, search, and read the game's decompiled client scripts |
 | `network` | Capture remote traffic with arguments, return values, and calling scripts |
+| `screenshot` | Capture the Roblox window to visually verify ESP, UI, and menus |
 
 Large outputs are saved to temp files (`$TMPDIR/owmcp/`) and the tool returns the path plus a preview, so results stay small in the agent's context.
 
@@ -18,6 +19,7 @@ Large outputs are saved to temp files (`$TMPDIR/owmcp/`) and the tool returns th
 
 - macOS with [Opiumware](https://opiumware.com) attached to Roblox
 - Node.js 18+
+- Screen Recording permission for the app running your MCP client (only for `screenshot`)
 
 ## Setup
 

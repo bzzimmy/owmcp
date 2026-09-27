@@ -9,7 +9,7 @@ import { lastExecute } from "../robloxLog.js";
 const DESCRIPTION = `Run Luau in the Roblox client (Opiumware, thread identity 8) and get back return values, print/warn output, and errors with traceback.
 - Just \`return\` values; tables, Instances, Vector3s etc. are serialized automatically. Don't JSONEncode.
 - Each run has its own global scope. Use getgenv() to keep state between runs. _G is the executor's; the game's is getrenv()._G.
-- Full executor API is available (getgc, hookmetamethod, decompile, firesignal, ...).
+- Full executor API is available (getgc, hookmetamethod, decompile, firesignal, ...). To run a local file use the file parameter; the executor's own readfile/loadfile only see Opiumware's workspace folder.
 - Long-running code (loops, listeners) should task.spawn and return right away. On timeout the run itself is cancelled, but threads it spawned keep running.
 - Errors returned here are NOT in the console. Errors/prints after the run returns (spawned/deferred code) only show in logs: use logs sinceExecute=true.
 - Separate execute calls made in parallel may run in any order.
@@ -58,7 +58,9 @@ function formatResult(result: RunResult): string {
     sections.push("Output:\n" + lines.join("\n") + full);
   }
   if (!result.ok) {
-    sections.push("Error:\n" + (result.error ?? "Unknown error").trimEnd());
+    // Clients usually label failed results as errors already, so only add a heading when output precedes it.
+    const error = (result.error ?? "Unknown error").trimEnd();
+    sections.push(sections.length > 0 ? "Error:\n" + error : error);
   } else if (result.returns.length === 1) {
     sections.push("Returned:\n" + (result.returns[0] ?? ""));
   } else if (result.returns.length > 1) {

@@ -7,10 +7,15 @@ const PREVIEW_LENGTH = 1_500;
 const MAX_LINE = 300;
 export const OUTPUT_DIR = join(tmpdir(), "owmcp");
 
+/** A fresh path in the temp output folder, e.g. tempPath("screenshot", "png"). */
+export function tempPath(name: string, extension: string): string {
+  mkdirSync(OUTPUT_DIR, { recursive: true });
+  return join(OUTPUT_DIR, `${name}-${Date.now()}.${extension}`);
+}
+
 /** Saves text to a temp file and returns its path. */
 export function save(name: string, text: string): string {
-  mkdirSync(OUTPUT_DIR, { recursive: true });
-  const file = join(OUTPUT_DIR, `${name}-${Date.now()}.txt`);
+  const file = tempPath(name, "txt");
   writeFileSync(file, text);
   return file;
 }
