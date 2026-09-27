@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { tempPath, text } from "../output.js";
+import { portOwner } from "../session.js";
 
 const exec = promisify(execFile);
 const MAX_SIZE = 1024;
@@ -62,13 +63,4 @@ export function registerScreenshot(server: McpServer) {
       };
     },
   );
-}
-
-/** PID of the process listening on a local TCP port. */
-async function portOwner(port: number): Promise<string | undefined> {
-  try {
-    return (await exec("lsof", ["-t", `-iTCP:${String(port)}`, "-sTCP:LISTEN"])).stdout.trim().split("\n")[0];
-  } catch {
-    return undefined;
-  }
 }

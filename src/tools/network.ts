@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { runData } from "../bridge.js";
+import { disconnectWarning, runDataResult } from "../bridge.js";
 import { fit, save, text, truncate } from "../output.js";
 import { parseRegex } from "../regex.js";
 
@@ -58,31 +58,41 @@ export function registerNetwork(server: McpServer) {
         return text(`Invalid regex: ${(include instanceof Error ? include : (hide as Error)).message}`, true);
       }
 
-      const capture = await runData<Capture>(LUA, { action }, { port });
-      if (action === "start") {
-        const discarded = capture.previousCount > 0 ? ` (discarded the previous capture's ${capture.previousCount} calls)` : "";
-        return text(`Capturing remote traffic${discarded}. Do the thing in-game (or via execute), then use action=read.`);
-      }
-      if (!capture.started) return text("No capture yet. Use action=start first.", true);
-      if (action === "stop") {
-        if (!capture.wasCapturing) return text(`Capture was not running (${capture.count} calls from the last capture are kept).`);
-        return text(`Stopped. ${capture.count} calls recorded in ${capture.elapsed.toFixed(1)}s; use action=read to view them.`);
-      }
-
-      const entries = (capture.log ?? []).filter((entry) => !hide || !hide.test(entry.remote));
-      const status = [
-        `Capture ${capture.capturing ? "running" : "stopped"} · ${capture.elapsed.toFixed(1)}s · ${capture.count} calls`,
-        capture.dropped > 0 ? `${capture.dropped} oldest dropped (buffer full)` : undefined,
-        hide ? `${capture.count - entries.length} excluded` : undefined,
-      ]
-        .filter(Boolean)
-        .join(" · ");
-
-      if (entries.length === 0) return text(`${status}\nNo calls recorded${hide ? " (after exclude)" : ""}.`);
-      return include ? calls(status, entries, include, limit) : summary(status, entries, capture.elapsed, limit);
+      const { data, disconnected } = await runDataResult(LUA, { action }, { port });
+      const response = respond(action, data as Capture, include, hide, limit);
+      // After a kick the capture only holds outgoing calls to a dead server, so say so.
+      const [content] = response.content;
+      if (disconnected && content) content.text = `${disconnectWarning(disconnected)}\n\n${content.text}`;
+      return response;
     },
   );
 }
+
+/** The tool response for an action, given the in-game capture state. */
+function respond(action: "start" | "stop" | "read", capture: Capture, include: RegExp | undefined, hide: RegExp | undefined, limit: number) {
+  if (action === "start") {
+    const discarded = capture.previousCount > 0 ? ` (discarded the previous capture's ${capture.previousCount} calls)` : "";
+    return text(`Capturing remote traffic${discarded}. Do the thing in-game (or via execute), then use action=read.`);
+  }
+  if (!capture.started) return text("No capture yet (rejoining clears it). Use action=start first.", true);
+  if (action === "stop") {
+    if (!capture.wasCapturing) return text(`Capture was not running (${capture.count} calls from the last capture are kept).`);
+    return text(`Stopped. ${capture.count} calls recorded in ${capture.elapsed.toFixed(1)}s; use action=read to view them.`);
+  }
+
+  const entries = (capture.log ?? []).filter((entry) => !hide || !hide.test(entry.remote));
+  const status = [
+    `Capture ${capture.capturing ? "running" : "stopped"} · ${capture.elapsed.toFixed(1)}s · ${capture.count} calls`,
+    capture.dropped > 0 ? `${capture.dropped} oldest dropped (buffer full)` : undefined,
+    hide ? `${capture.count - entries.length} excluded` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  if (entries.length === 0) return text(`${status}\nNo calls recorded${hide ? " (after exclude)" : ""}.`);
+  return include ? calls(status, entries, include, limit) : summary(status, entries, capture.elapsed, limit);
+}
+
 
 /** One line per remote: how often it fired and its latest arguments. */
 function summary(status: string, entries: Entry[], elapsed: number, limit: number) {
