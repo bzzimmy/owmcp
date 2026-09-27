@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { send } from "./opiumware.js";
+import { compactLines } from "./output.js";
 
 /** What lua/runtime.luau reports back. */
 export interface RunResult {
@@ -110,16 +111,16 @@ if not entry then return false end
 runs[ARGS.id] = nil
 getgenv().__owmcp_sinks[entry.sink] = nil
 task.cancel(entry.thread)
-return true
+return entry.sink.lines
 `;
 
 /** Cancels a run that is still in progress (e.g. after a timeout). Returns a human-readable outcome. */
 async function cancel(id: string, port?: number): Promise<string> {
   try {
-    const cancelled = await runData<boolean>(CANCEL, { id }, { port, timeoutMs: 3000, cancelOnTimeout: false });
-    return cancelled
-      ? "The run was cancelled (threads it spawned with task.spawn/delay keep running)."
-      : "The run had already finished or crashed before reporting; check the logs.";
+    const output = await runData<string[] | false>(CANCEL, { id }, { port, timeoutMs: 3000, cancelOnTimeout: false });
+    if (output === false) return "The run had already finished or crashed before reporting; check the logs.";
+    const printed = output.length > 0 ? `\nOutput before the timeout:\n${compactLines(output).lines.join("\n")}` : "";
+    return `The run was cancelled (threads it spawned with task.spawn/delay keep running).${printed}`;
   } catch {
     return "Could not cancel it: the client is not responding (possibly frozen by a loop that never yields).";
   }

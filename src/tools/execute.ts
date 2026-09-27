@@ -33,8 +33,15 @@ export function registerExecute(server: McpServer) {
         return text("Provide exactly one of `code` or `file`.", true);
       }
       const path = resolve(file ?? "");
-      const source = code ?? (await readFile(path, "utf8").catch(() => undefined));
-      if (source === undefined) return text(`Could not read file: ${path}`, true);
+      let source = code;
+      if (source === undefined) {
+        try {
+          source = await readFile(path, "utf8");
+        } catch (error) {
+          return text(`Could not read file ${path}: ${error instanceof Error ? error.message : String(error)}`, true);
+        }
+        if (source.trim() === "") return text(`File is empty: ${path}`, true);
+      }
 
       lastExecute.at = Date.now();
       const result = await run(source, { port, timeoutMs: timeout * 1000 });
